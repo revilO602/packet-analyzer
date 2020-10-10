@@ -1,7 +1,7 @@
 #import Protocols from Protocols
 
 class Frame:
-    def __init__(self,bytes, api_len, protocols):
+    def __init__(self, bytes, api_len, protocols):
         self.protocols = protocols
         self.api_len = api_len
         self.real_len = self.set_real_len()
@@ -56,13 +56,13 @@ class Frame:
 
     def print_layer2(self):
         if self.layer2_type == "eth":
-            print("Ethernet II")
+            return "Ethernet II"
         elif self.layer2_type == "raw":
-            print("802.3 - RAW")
+            return "802.3 - RAW"
         elif self.layer2_type == "snap":
-            print("802.3 - SNAP")
+            return "802.3 - SNAP"
         else:
-            print ("802.3 - LLC")
+            return "802.3 - LLC"
 
 
     def set_layer3_protocol(self):
@@ -78,11 +78,11 @@ class Frame:
     def print_layer3_protocol(self):
         layer3_key = int.from_bytes(self.layer3_protocol,'big')
         if self.layer2_type == "raw":
-            print("IPX")
+            return "IPX"
         elif self.layer2_type == "eth" or self.layer2_type == "snap":
-            print(self.protocols.ethertypes[layer3_key])
+            return self.protocols.ethertypes[layer3_key]
         else:
-            print(self.protocols.lsaps[layer3_key])
+            return self.protocols.lsaps[layer3_key]
 
     def set_saddr(self):
         self.saddr = self.bytes[26:30]
@@ -112,23 +112,6 @@ class Frame:
                 frame_formatted_str += '\n'
             elif i % 2 == 0:
                 frame_formatted_str += ' '
-        print(frame_formatted_str)
+        return frame_formatted_str
 
 
-    def print_info(self):
-        print("dĺžka rámca poskytnutá pcap API –", str(self.api_len))
-        print("dĺžka rámca prenášaného po médiu - " + str(self.real_len))
-        self.print_layer2()
-        print("Zdrojová MAC adresa:", self.smac.hex().upper())
-        print("Cieľová MAC adresa:", self.dmac.hex().upper())
-        try:
-            self.print_layer3_protocol()
-        except KeyError:
-            print("Neznamy Protokol")
-        if self.is_eth_ipv4():
-            saddr = self.saddr
-            daddr = self.daddr
-            print("Zdrojová IP adresa:", '.'.join([str(saddr[0]), str(saddr[1]), str(saddr[2]), str(saddr[3])]))
-            print("Cieľová IP adresa:", '.'.join([str(daddr[0]), str(daddr[1]), str(daddr[2]), str(daddr[3])]))
-            print(self.protocols.ip_protocols[int.from_bytes(self.layer4_protocol, 'big')])
-        self.print_frame()

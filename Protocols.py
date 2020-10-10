@@ -6,7 +6,7 @@ class Protocols:
         self.udp_ports = self.make_dict("udp_ports.txt")
         self.ip_protocols = self.make_dict("ip_protocols.txt")
 
-    def make_dict(self,filename):
+    def make_dict(self, filename):
         new_dict = {}
         with open(filename, "r") as f:
             for line in f:
