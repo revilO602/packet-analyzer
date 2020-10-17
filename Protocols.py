@@ -1,3 +1,4 @@
+# Class for keeping all the dictionaries for protocols and ports
 class Protocols:
     def __init__(self):
         self.ethertypes = self.make_dict("ethertypes.txt")
@@ -11,6 +12,6 @@ class Protocols:
         with open(filename, "r") as f:
             for line in f:
                 key, value = line.split(' ', 1)
-                new_dict[int(key, base=16)] = value.strip()
+                new_dict[int(key, base=16)] = value.strip().upper()
             return new_dict
 
