@@ -1,5 +1,5 @@
-from Layer3 import Layer3
-from Layer4 import Layer4
+from FrameStructure.Layer3 import Layer3
+from FrameStructure.Layer4 import Layer4
 
 
 def set_layer2_type(bytes):

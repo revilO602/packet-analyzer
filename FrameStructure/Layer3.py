@@ -17,6 +17,11 @@ class Layer3:
     def get_len(self):
         return (int.from_bytes(self.ihl, 'big') % 16) * 4
 
+    def is_arp_req(self):
+        if self.op == b'\x00\x01':
+            return True
+        return False
+
     # For ARP returns returns operation as string
     def get_op(self):
         if self.op == b'\x00\x01':
