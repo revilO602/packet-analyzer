@@ -69,6 +69,7 @@ def print_frame_info(frame, output, protocols):
                 output.insert(END, ''.join([translated_dport, '\n']))
             output.insert(END, ''.join(["Zdrojový port: ", str(int.from_bytes(frame.layer4.sport, 'big')), '\n',
                                         "Cieľový port: ", str(int.from_bytes(frame.layer4.dport, 'big')), '\n']))
+    output.insert(END, bytes_to_formatted_string(frame.bytes) + "\n\n")
 
 
 def translate_port(port_bytes, dict, layer4):
@@ -121,13 +122,33 @@ def filter_frames(file_reader, dicts, output, filter):
         # Port filter can be applied only to Ethernet II + IPv4 + TCP/UDP
         if check_filter(frame, dicts, filter):
             print_frame_info(frame, output, dicts)
-            output.insert(END, bytes_to_formatted_string(raw(api_frame)) + "\n\n")
 
 
-def print_arp_pair(pair, output, dicts):
+def print_arp_pair(pair, pair_number, output, dicts):
+    pair_number += 1
+    output.insert(END, ''.join(["Komunikácia č.", str(pair_number), '\n']))
     for frame in pair.frames:
+        if frame.layer3.op == b'\x00\x01':
+            output.insert(END, ''.join([frame.layer3.get_op(), ", IP adresa: ", ip_to_str(pair.requested_ip),
+                                        ", MAC adresa: ???", '\n', "Zdrojová IP: ", ip_to_str(frame.layer3.sip),
+                                        ", Cieľová IP: ", ip_to_str(frame.layer3.dip), '\n']))
+        else:
+            output.insert(END, ''.join([frame.layer3.get_op(), ", IP adresa: ", ip_to_str(pair.requested_ip),
+                                        ", MAC adresa: ", mac_to_str(frame.smac), '\n', "Zdrojová IP: ",
+                                        ip_to_str(frame.layer3.sip), ", Cieľová IP: ",
+                                        ip_to_str(frame.layer3.dip), '\n']))
         print_frame_info(frame, output, dicts)
-        output.insert(END, bytes_to_formatted_string(frame.bytes) + "\n\n")
+
+
+def print_unpaired_arps(pairs, unpaired, output, dicts):
+    output.insert(END, "Zvyšné ARP rámce:\n")
+    for pair in pairs:
+        for frame in pair.frames:
+            unpaired.append(frame)
+    unpaired.sort(key=lambda i: i.index)
+    for frame in unpaired:
+        output.insert(END, frame.layer3.get_op() + '\n')
+        print_frame_info(frame, output, dicts)
 
 
 def arp_pairs(file_reader, dicts, output):
@@ -148,25 +169,15 @@ def arp_pairs(file_reader, dicts, output):
                 frame.placed = False
                 for pair in pairs:
                     if pair.is_reply(frame):
-                        pair_number += 1
-                        output.insert(END, ''.join(["Komunikácia č.", str(pair_number), '\n']))
-                        print_arp_pair(pair, output, dicts)
+                        print_arp_pair(pair, pair_number, output, dicts)
                         pairs.remove(pair)
                         frame.placed = True
                 if not frame.placed and frame.layer3.op == b'\x00\x01':
                     pairs.append(ArpPair(frame))
                 elif not frame.placed:
                     unpaired.append(frame)
-    for pair in pairs:
-        for frame in pair.frames:
-            output.insert(END, frame.layer3.get_op() + '\n')
-            print_frame_info(frame, output, dicts)
-            output.insert(END, bytes_to_formatted_string(frame.bytes))
-    for frame in unpaired:
-        output.insert(END, frame.layer3.get_op() + '\n')
-        print_frame_info(frame, output, dicts)
-        output.insert(END, bytes_to_formatted_string(frame.bytes))
-
+    if unpaired or pairs:
+        print_unpaired_arps(pairs, unpaired, output, dicts)
 
 
 # Print all the destination IP addresses to output
@@ -187,7 +198,6 @@ def show_frames(file_reader, dicts, output):
         i += 1
         frame = Frame(i, raw(api_frame), api_frame.wirelen, dicts)
         print_frame_info(frame, output, dicts)
-        output.insert(END, bytes_to_formatted_string(raw(api_frame)) + "\n\n")
         if frame.translate_layer3_protocol(dicts.ethertypes) == "IPV4":
             new_daddr = frame.layer3.dip
             new_daddr = IpAddress(1, new_daddr)
