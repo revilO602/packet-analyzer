@@ -1,14 +1,16 @@
+# Encapsulates a TCP stream of frames
 class TcpComm:
     def __init__(self, frame):
         self.starters_ip = frame.layer3.sip
         self.starters_port = frame.layer4.sport
         self.recievers_ip = frame.layer3.dip
         self.recievers_port = frame.layer4.dport
-        self.handshake_stage = 1    # Starts at 1 because SYN is a prerequisite to TcpComm objects creation
-        self.expected_port = self.recievers_port
-        self.end_stage = 0
+        self.handshake_stage = 1  # Starts at 1 because SYN is a prerequisite to TcpComm objects creation, max=3
+        self.expected_port = self.recievers_port  # expected source port of next frame - used for opening and ending
+        self.end_stage = 0  # max = 4
         self.frames = [frame]
 
+    # Update handshake-stage according to the new frame
     def update_handshake(self, frame):
         if self.handshake_stage == 1:
             if int.from_bytes(frame.layer4.flags, 'big') == 18 and frame.layer4.sport == self.expected_port:
@@ -18,6 +20,7 @@ class TcpComm:
             if int.from_bytes(frame.layer4.flags, 'big') == 16 and frame.layer4.sport == self.expected_port:
                 self.handshake_stage = 3
 
+    # Update end-stage according to the new frame
     def update_end(self, frame):
         if int.from_bytes(frame.layer4.flags, 'big') & 4:
             self.end_stage = 4
@@ -40,6 +43,7 @@ class TcpComm:
               frame.layer4.sport == self.expected_port):
             self.end_stage = 4
 
+    # Check if the frame belongs to this stream
     def belongs(self, frame):
         if ((frame.layer3.sip, frame.layer3.dip, frame.layer4.sport, frame.layer4.dport) == (
                 self.starters_ip, self.recievers_ip, self.starters_port, self.recievers_port) or

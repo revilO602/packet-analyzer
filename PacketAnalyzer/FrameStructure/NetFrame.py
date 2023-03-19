@@ -2,6 +2,8 @@ from FrameStructure.Layer3 import Layer3
 from FrameStructure.Layer4 import Layer4
 
 
+# Set layer 2 type for other functions to easily determine
+# 'e' = Ethernet II, 'r' = 802.3 RAW, 's' = 802.3 SNAP, 'l' = 802.3 LLC
 def set_layer2_type(bytes):
     if int.from_bytes(bytes[12:14], "big") > 0x600:
         return 'e'
@@ -13,7 +15,8 @@ def set_layer2_type(bytes):
         return "l"
 
 
-class Frame:
+# Class responsible for building the frame and providing select information about it
+class NetFrame:
     def __init__(self, index, bytes, api_len, protocols):
         self.index = index
         self.bytes = bytes
@@ -50,7 +53,7 @@ class Frame:
             return "Neznamy protokol"
         return layer4_protocol
 
-    # Sets all the attributes using the bytes of the frame TODO pozor na KeyExcept
+    # Sets all the attributes using the bytes of the frame - builds the frame bottom->up
     def build(self, bytes, protocols):
         self.layer2_type = set_layer2_type(bytes)
         self.set_layer3_protocol(bytes)
@@ -81,6 +84,7 @@ class Frame:
         if self.layer2_type == "l":
             self.layer3_protocol = bytes[14:15]
 
+    # Returns a string version of the layer 3 protocol
     def print_layer3_protocol(self, protocols):
         if self.layer2_type == "r":
             return "IPX"

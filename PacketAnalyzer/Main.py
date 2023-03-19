@@ -2,7 +2,7 @@ from tkinter import *
 from operator import attrgetter
 from scapy.all import *
 from IpAddress import IpAddress
-from FrameStructure.Frame import Frame
+from FrameStructure.NetFrame import NetFrame
 from CommunicationStreams.ArpPair import ArpPair
 from CommunicationStreams.TcpComm import TcpComm
 from CommunicationStreams.TftpComm import TftpComm
@@ -35,21 +35,32 @@ def bytes_to_formatted_string(bytes):
     return formatted_str
 
 
-# Translate ICMP type byte to string
-def get_icmp_type(byte):
-    dict = {0: "Echo Reply", 3: "Destination Unreachable", 4: "Source Quench",
-            5: "Redirect", 8: "Echo", 9: "Router Advertisement", 10: "Router Selection",
-            11: "Time Exceeded", 12: "Parameter Problem", 13: "Timestamp", 14: "Timestamp Reply",
-            15: "Information Request", 16: "Information Reply", 17: "Address Mask Request",
-            18: "Address Mask Reply", 30: "Traceroute"}
-    try:
-        return dict[int.from_bytes(byte, 'big')]
-    except KeyError:
-        return "Unknown ICMP type"
+def print_layer3(frame, output, protocols):
+    output.insert(END, ''.join(["Zdrojová IP adresa: ", ip_to_str(frame.layer3.sip), '\n',
+                                "Cieľová IP adresa: ", ip_to_str(frame.layer3.dip), '\n',
+                                frame.translate_layer4_prot(protocols.ip_protocols), '\n']))
+
+
+def print_layer4(frame, output, protocols, tftp=False):
+    layer4 = frame.translate_layer4_prot(protocols.ip_protocols)
+    if layer4 == "ICMP":
+        output.insert(END, frame.layer4.get_icmp_type() + '\n')
+    elif layer4 == "TCP" or layer4 == "UDP":
+        if tftp:
+            output.insert(END, "TFTP\n")
+        else:
+            translated_sport = translate_port(frame.layer4.sport, protocols, layer4)
+            translated_dport = translate_port(frame.layer4.dport, protocols, layer4)
+            if translated_sport:
+                output.insert(END, ''.join([translated_sport, '\n']))
+            elif translated_dport:
+                output.insert(END, ''.join([translated_dport, '\n']))
+        output.insert(END, ''.join(["Zdrojový port: ", str(int.from_bytes(frame.layer4.sport, 'big')), '\n',
+                                    "Cieľový port: ", str(int.from_bytes(frame.layer4.dport, 'big')), '\n']))
 
 
 # Print frames attributes to output with formatting and translation of protocol bytes
-def print_frame_info(frame, output, protocols):
+def print_frame_info(frame, output, protocols, tftp=False):
     output.insert(END, ''.join([str(frame.index) + ". rámec\n", "dĺžka rámca poskytnutá pcap API – ",
                                 str(frame.api_len), '\n', "dĺžka rámca prenášaného po médiu - ",
                                 str(frame.real_len), '\n', frame.print_layer2(), '\n',
@@ -58,20 +69,9 @@ def print_frame_info(frame, output, protocols):
     output.insert(END, frame.print_layer3_protocol(protocols) + '\n')
     if frame.translate_layer3_protocol(protocols.ethertypes) == "IPV4":
         layer4 = frame.translate_layer4_prot(protocols.ip_protocols)
-        output.insert(END, ''.join(["Zdrojová IP adresa: ", ip_to_str(frame.layer3.sip), '\n',
-                                    "Cieľová IP adresa: ", ip_to_str(frame.layer3.dip), '\n',
-                                    layer4, '\n']))
-        if layer4 == "ICMP":
-            output.insert(END, get_icmp_type(frame.layer4.icmp_type) + '\n')
-        if layer4 == "TCP" or layer4 == "UDP":
-            translated_sport = translate_port(frame.layer4.sport, protocols, layer4)
-            translated_dport = translate_port(frame.layer4.dport, protocols, layer4)
-            if translated_sport:
-                output.insert(END, ''.join([translated_sport, '\n']))
-            if translated_dport:
-                output.insert(END, ''.join([translated_dport, '\n']))
-            output.insert(END, ''.join(["Zdrojový port: ", str(int.from_bytes(frame.layer4.sport, 'big')), '\n',
-                                        "Cieľový port: ", str(int.from_bytes(frame.layer4.dport, 'big')), '\n']))
+        print_layer3(frame, output, protocols)
+        if layer4 == "ICMP" or layer4 == "TCP" or layer4 == "UDP":
+            print_layer4(frame, output, protocols, tftp)
     output.insert(END, bytes_to_formatted_string(frame.bytes) + "\n\n")
 
 
@@ -109,36 +109,44 @@ def check_filter(frame, dicts, filter):
 # Displays the frames with an applied filter
 def filter_frames(file_reader, dicts, output, filter):
     i = 0
+    rip_amount = 0
     if filter == "TFTP":
         tftp_comm(file_reader, output, dicts)
     for api_frame in file_reader:
         i += 1
-        frame = Frame(i, raw(api_frame), api_frame.wirelen, dicts)
+        frame = NetFrame(i, raw(api_frame), api_frame.wirelen, dicts)
         if check_filter(frame, dicts, filter):
             print_frame_info(frame, output, dicts)
+            if filter == "RIP":
+                rip_amount += 1
+    if filter == "RIP":
+        output.insert(END, "Počet RIP rámcov je:\n" + str(rip_amount))
 
 
-# Prints one communication stream (list of frames)
-def print_comm(comm, comm_number, output, dicts):
+# Prints one communication stream (list of frames) - used for tftp and tcp streams
+def print_comm(comm, comm_number, output, dicts, tftp=False):
     output.insert(END, ''.join(['\n', str(comm_number), ". Komunikácia:\n"]))
     if len(comm.frames) > 20:
         for frame in comm.frames[:10]:
-            print_frame_info(frame, output, dicts)
+            print_frame_info(frame, output, dicts, tftp)
         for frame in comm.frames[-10:]:
-            print_frame_info(frame, output, dicts)
+            print_frame_info(frame, output, dicts, tftp)
     else:
         for frame in comm.frames:
-            print_frame_info(frame, output, dicts)
+            print_frame_info(frame, output, dicts, tftp)
 
 
-def print_tcp_comms(comms, output, dicts):
+# Print complete streams and open-ended streams after
+def print_tcp_comms(comms, output, dicts, one_comm=False):
     comm_number = 0
     for comm in comms:
-        if comm_number == 0:
-            output.insert(END, "Úplne komunikácie:\n")
         if comm.handshake_stage == 3 and comm.end_stage == 4:
+            if comm_number == 0:
+                output.insert(END, "Úplne komunikácie:\n")
             comm_number += 1
             print_comm(comm, comm_number, output, dicts)
+            if one_comm:
+                break
     comm_number = 0
     for comm in comms:
         if comm.handshake_stage == 3 and not comm.end_stage == 4:
@@ -146,54 +154,68 @@ def print_tcp_comms(comms, output, dicts):
                 output.insert(END, "Začaté ale neukončené (neúplne) komunikácie:\n")
             comm_number += 1
             print_comm(comm, comm_number, output, dicts)
+            if one_comm:
+                break
 
 
-def tcp_comm(file_reader, output, dicts, filter=''):
+# Add a TCP frame where it belongs (to open stream or open new stream or put into rest[] if no SYN flag)
+def add_tcp_comm(frame, comms, rest):
+    if not comms:
+        if frame.layer4.is_3wh_start():
+            comms.append(TcpComm(frame))
+        else:
+            rest.append(frame)
+    else:
+        frame.placed = False
+        for comm in comms:
+            if comm.end_stage < 4 and comm.belongs(frame):
+                frame.placed = True
+        if not frame.placed and frame.layer4.is_3wh_start():
+            comms.append(TcpComm(frame))
+        elif not frame.placed:
+            rest.append(frame)
+
+
+# Create a list of TCP streams and print them out
+def tcp_comm(file_reader, output, dicts, filter='', one_comm=False):
     i = 0
     comms = []
     rest = []
     for api_frame in file_reader:
         i += 1
-        frame = Frame(i, raw(api_frame), api_frame.wirelen, dicts)
+        frame = NetFrame(i, raw(api_frame), api_frame.wirelen, dicts)
         if (frame.translate_layer3_protocol(dicts.ethertypes) == "IPV4" and
                 frame.translate_layer4_prot(dicts.ip_protocols) == "TCP"):
             if not filter or check_filter(frame, dicts, filter):
-                if not comms:
-                    if frame.layer4.is_3wh_start():
-                        comms.append(TcpComm(frame))
-                    else:
-                        rest.append(frame)
-                else:
-                    frame.placed = False
-                    for comm in comms:
-                        if comm.end_stage < 4 and comm.belongs(frame):
-                            frame.placed = True
-                    if not frame.placed and frame.layer4.is_3wh_start():
-                        comms.append(TcpComm(frame))
-                    elif not frame.placed:
-                        rest.append(frame)
-    print_tcp_comms(comms, output, dicts)
-    if rest:
-        output.insert(END, "Zvyšné rámce (neprebehol three-way handshake):\n")
-        for frame in rest:
-            print_frame_info(frame, output, dicts)
+                add_tcp_comm(frame, comms, rest)
+    print_tcp_comms(comms, output, dicts, one_comm)
+    if not one_comm:
+        for comm in comms:
+            if comm.handshake_stage < 3:
+                for frame in comm.frames:
+                    rest.append(frame)
+        if rest:
+            output.insert(END, "Zvyšné rámce (neprebehol three-way handshake):\n")
+            rest.sort(key=lambda j: j.index)
+            for frame in rest:
+                print_frame_info(frame, output, dicts)
 
 
-def print_arp_pair(pair, pair_number, output, dicts):
-    output.insert(END, ''.join(["Komunikácia č.", str(pair_number), '\n']))
-    for frame in pair.frames:
-        if frame.layer3.is_arp_req():
-            output.insert(END, ''.join([frame.layer3.get_op(), ", IP adresa: ", ip_to_str(pair.requested_ip),
-                                        ", MAC adresa: ???", '\n', "Zdrojová IP: ", ip_to_str(frame.layer3.sip),
-                                        ", Cieľová IP: ", ip_to_str(frame.layer3.dip), '\n']))
-        else:
-            output.insert(END, ''.join([frame.layer3.get_op(), ", IP adresa: ", ip_to_str(pair.requested_ip),
-                                        ", MAC adresa: ", mac_to_str(frame.smac), '\n', "Zdrojová IP: ",
-                                        ip_to_str(frame.layer3.sip), ", Cieľová IP: ",
-                                        ip_to_str(frame.layer3.dip), '\n']))
-        print_frame_info(frame, output, dicts)
+# Print one ARP frame
+def print_arp(frame, output, dicts):
+    if frame.layer3.is_arp_req():
+        output.insert(END, ''.join([frame.layer3.get_op(), ", IP adresa: ", ip_to_str(frame.layer3.dip),
+                                    ", MAC adresa: ???", '\n', "Zdrojová IP: ", ip_to_str(frame.layer3.sip),
+                                    ", Cieľová IP: ", ip_to_str(frame.layer3.dip), '\n']))
+    else:
+        output.insert(END, ''.join([frame.layer3.get_op(), ", IP adresa: ", ip_to_str(frame.layer3.sip),
+                                    ", MAC adresa: ", mac_to_str(frame.smac), '\n', "Zdrojová IP: ",
+                                    ip_to_str(frame.layer3.sip), ", Cieľová IP: ",
+                                    ip_to_str(frame.layer3.dip), '\n']))
+    print_frame_info(frame, output, dicts)
 
 
+# Transfer unfinished pairs to one list, sort them by frame index and print them
 def print_unpaired_arps(pairs, unpaired, output, dicts):
     output.insert(END, "Zvyšné ARP rámce:\n")
     for pair in pairs:
@@ -201,10 +223,34 @@ def print_unpaired_arps(pairs, unpaired, output, dicts):
             unpaired.append(frame)
     unpaired.sort(key=lambda i: i.index)
     for frame in unpaired:
-        output.insert(END, frame.layer3.get_op() + '\n')
-        print_frame_info(frame, output, dicts)
+        print_arp(frame, output, dicts)
 
 
+# Add the ARP frame where it belongs (reply to request, request to request, new pair etc.)
+def add_arp_frame(frame, pairs, unpaired, pair_number, output, dicts):
+    if not pairs:
+        if frame.layer3.is_arp_req():
+            pairs.append(ArpPair(frame))
+        else:
+            unpaired.append(frame)
+    else:
+        frame.placed = False
+        for pair in pairs:
+            if pair.is_reply(frame):
+                pair_number += 1
+                output.insert(END, ''.join(["Komunikácia č.", str(pair_number), '\n']))
+                for frame in pair.frames:
+                    print_arp(frame, output, dicts)
+                pairs.remove(pair)
+                frame.placed = True
+                break
+        if not frame.placed and frame.layer3.is_arp_req():
+            pairs.append(ArpPair(frame))
+        elif not frame.placed:
+            unpaired.append(frame)
+
+
+# Create a list of ARP pairs and print them out
 def arp_pairs(file_reader, dicts, output):
     i = 0
     pair_number = 0
@@ -212,45 +258,20 @@ def arp_pairs(file_reader, dicts, output):
     unpaired = []
     for api_frame in file_reader:
         i += 1
-        frame = Frame(i, raw(api_frame), api_frame.wirelen, dicts)
+        frame = NetFrame(i, raw(api_frame), api_frame.wirelen, dicts)
         if frame.translate_layer3_protocol(dicts.ethertypes) == "ARP":
-            if not pairs:
-                if frame.layer3.is_arp_req():
-                    pairs.append(ArpPair(frame))
-                else:
-                    unpaired.append(frame)
-            else:
-                frame.placed = False
-                for pair in pairs:
-                    if pair.is_reply(frame):
-                        pair_number += 1
-                        print_arp_pair(pair, pair_number, output, dicts)
-                        pairs.remove(pair)
-                        frame.placed = True
-                        break
-                if not frame.placed and frame.layer3.is_arp_req():
-                    pairs.append(ArpPair(frame))
-                elif not frame.placed:
-                    unpaired.append(frame)
+            add_arp_frame(frame, pairs, unpaired, pair_number, output, dicts)
     if unpaired or pairs:
         print_unpaired_arps(pairs, unpaired, output, dicts)
 
 
-# Print the TFTP streams, if more than 20 frames, print only first 10 and last 10
-def print_tftp_comms(comms, output, dicts):
-    comm_number = 0
-    for comm in comms:
-        comm_number += 1
-        print_comm(comm, comm_number, output, dicts)
-
-
-# Create a list of TFTP streams
+# Create a list of TFTP streams and print them out
 def tftp_comm(file_reader, output, dicts):
     comms = []
     i = 0
     for api_frame in file_reader:
         i += 1
-        frame = Frame(i, raw(api_frame), api_frame.wirelen, dicts)
+        frame = NetFrame(i, raw(api_frame), api_frame.wirelen, dicts)
         if (frame.translate_layer3_protocol(dicts.ethertypes) == "IPV4" and
                 frame.translate_layer4_prot(dicts.ip_protocols)) == "UDP":
             if (translate_port(frame.layer4.sport, dicts, "UDP") == "TFTP" or
@@ -260,7 +281,10 @@ def tftp_comm(file_reader, output, dicts):
                 for comm in comms:
                     comm.check(frame)
     if comms:
-        print_tftp_comms(comms, output, dicts)
+        comm_number = 0
+        for comm in comms:
+            comm_number += 1
+            print_comm(comm, comm_number, output, dicts, True)
 
 
 # Add unique address or increment count
@@ -294,7 +318,7 @@ def show_frames(file_reader, dicts, output):
     i = 0
     for api_frame in file_reader:
         i += 1
-        frame = Frame(i, raw(api_frame), api_frame.wirelen, dicts)
+        frame = NetFrame(i, raw(api_frame), api_frame.wirelen, dicts)
         print_frame_info(frame, output, dicts)
         if frame.translate_layer3_protocol(dicts.ethertypes) == "IPV4":
             new_daddr = frame.layer3.dip

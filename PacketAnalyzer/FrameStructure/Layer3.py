@@ -1,3 +1,4 @@
+# Encapsulates layer 3 of the frame
 class Layer3:
     def __init__(self, bytes, type):
         if type == "ARP":
@@ -8,7 +9,6 @@ class Layer3:
             self.dip = bytes[24:28]
         elif type == "IPV4":
             self.ihl = bytes[0:1]
-            self.fragment = bytes[6:8]
             self.layer4_prot = bytes[9:10]
             self.sip = bytes[12:16]
             self.dip = bytes[16:20]
